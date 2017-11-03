@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package connectors; 
+package third_party.connectors; 
 
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
@@ -53,9 +53,8 @@ import connectors.DBRow;
 
 public class HanaToBQ {
   private static Logger logger = Logger.getLogger(HanaToBQ.class.getSimpleName());
-  private static Map<String, Object> SAMPLE_MAP = new HashMap<String, Object>();
-  private static String value_sep = "<<>>";
-  private static String col_sep = "::";
+  
+  // Mapping Hana to BQ types - Used to create BQ schema, unlisted types are created as STRING
   private static final Map<String, String> hanaToBqTypeMap = ImmutableMap.<String, String>builder()
     .put("NVARCHAR", "STRING")
     .put("VARCHAR", "STRING")
@@ -80,6 +79,10 @@ public class HanaToBQ {
     .put("REAL", "FLOAT")
     .build(); 
 
+  /*
+   * PTransform for using JdbcIO to read a table from Hana and transform
+   * the rows into a BigQuery TableRow object. 
+   */
   public static class ScanHanaTableFn extends PTransform<PBegin, PCollection<TableRow>> {
 
     String driver = "";
@@ -87,6 +90,7 @@ public class HanaToBQ {
     String username = "";
     String password = "";
     String query = "";
+
     public ScanHanaTableFn(String d, String cs, String u, String p, String q) 
     {
       this.driver = d;
@@ -198,43 +202,43 @@ public class HanaToBQ {
 
   public interface Options extends PipelineOptions {
     @Description("Hana table name to read")
-      @Validation.Required
-      String getTableName();
+    @Validation.Required
+    String getTableName();
     void setTableName(String value);
 
     @Description("Hana connection string.")
-      @Validation.Required
-      String getConnectionString();
+    @Validation.Required
+    String getConnectionString();
     void setConnectionString(String value);
 
     @Description("Hana username.")
-      @Validation.Required
-      String getUsername();
+    @Validation.Required
+    String getUsername();
     void setUsername(String value);
 
     @Description("Hana password.")
-      @Validation.Required
-      String getPassword();
+    @Validation.Required
+    String getPassword();
     void setPassword(String value);
 
     @Description("Hana driver to use.")
-      @Default.String("com.sap.db.jdbc.Driver")
-      String getDriver();
+    @Default.String("com.sap.db.jdbc.Driver")
+    String getDriver();
     void setDriver(String value);
 
     @Description("Bigquery destionation dataset.")
-      @Validation.Required
-      String getDestDataset();
+    @Validation.Required
+    String getDestDataset();
     void setDestDataset(String value);
 
     @Description("Timestamp column name.")
-      @Validation.Required
-      String getTimestampColumn();
+    @Validation.Required
+    String getTimestampColumn();
     void setTimestampColumn(String value);
 
     @Description("Start time, inclusive")
-      @Validation.Required
-      String getStartTime();
+    @Validation.Required
+    String getStartTime();
     void setStartTime(String value);
 
     @Description("End time, inclusive")
