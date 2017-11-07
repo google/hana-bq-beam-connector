@@ -4,7 +4,18 @@ This project was meant to show the ability to move data from SAP Hana to Google
 BigQuery using Apache Beam. It is a proof of concept and needs more work to be
 able to handle all use cases and scenarios. 
 
-You can build and run the pipeline using the following maven command:
+The pom.xml file references the SAP Hana jdbc driver which you need to obtain
+from the SAP client install and can be installed locally to match the pom.xml
+entry with the following command:
+
+mvn install:install-file -Dfile=ngdbc.jar \
+	-DgroupId=sap \
+	-DartifactId=sap-hana-jdbc \
+	-Dversion=1.0 \
+	-Dpackaging=jar \
+	-DgeneratePom=true
+
+Once the jdbc driver is installed, you can build and run the pipeline using the following maven command:
 
 mvn compile exec:java \
 	-Dexec.mainClass=connectors.HanaToBQ \
