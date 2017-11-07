@@ -1,1 +1,23 @@
 This is not an official Google product.
+
+This project was meant to show the ability to move data from SAP Hana to Google
+BigQuery using Apache Beam. It is a proof of concept and needs more work to be
+able to handle all use cases and scenarios. 
+
+You can build and run the pipeline using the following maven command:
+
+mvn compile exec:java \
+	-Dexec.mainClass=connectors.HanaToBQ \
+	-Dexec.args="--tempLocation=<i.e. gs://my-bucket/temp>
+		--runner=DataflowRunner
+		--project=<my-project-id>
+		--stagingLocation=<i.e. gs://my-bucket/staging>
+		--connectionString=jdbc:sap://x.x.x.x:30015/?databaseName=x
+		--tableName=<hana table name>
+		--username=<hana username>
+		--password=<hana password>
+		--destDataset=<bq dest dataset>
+		--timestampColumn=<numeric timestamp column>
+		--startTime=<epoch start time>
+		--endTime=<epoch end time>" \
+	-Pdataflow-runner
