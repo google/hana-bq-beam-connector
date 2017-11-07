@@ -1,10 +1,10 @@
 /*
- * Copyright 2017 Mark Shalda 
- * 
+ * Copyright 2017 Mark Shalda
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package third_party.connectors; 
+package third_party.connectors;
 
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
@@ -34,11 +34,13 @@ import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
 import org.apache.beam.sdk.io.jdbc.JdbcIO;
+import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionView;
 import com.google.gson.Gson;
 import com.google.common.collect.ImmutableMap;
 import java.security.SecureRandom;
@@ -53,8 +55,8 @@ import connectors.DBRow;
 
 public class HanaToBQ {
   private static Logger logger = Logger.getLogger(HanaToBQ.class.getSimpleName());
-  
-  // Mapping Hana to BQ types - Used to create BQ schema, unlisted types are created as STRING
+  private static String schemaQueryTemplate = "SELECT COLUMN_NAME,DATA_TYPE_NAME FROM TABLE_COLUMNS WHERE TABLE_NAME = '%s' ORDER BY POSITION ASC";
+  private static String queryTemplate = "SELECT * FROM %s WHERE %s >= %s %s";
   private static final Map<String, String> hanaToBqTypeMap = ImmutableMap.<String, String>builder()
     .put("NVARCHAR", "STRING")
     .put("VARCHAR", "STRING")
@@ -77,37 +79,72 @@ public class HanaToBQ {
     .put("DECIMAL", "FLOAT")
     .put("DOUBLE", "FLOAT")
     .put("REAL", "FLOAT")
-    .build(); 
+    .build();
 
-  /*
-   * PTransform for using JdbcIO to read a table from Hana and transform
-   * the rows into a BigQuery TableRow object. 
-   */
-  public static class ScanHanaTableFn extends PTransform<PBegin, PCollection<TableRow>> {
+  public static class HanaToDBRow extends PTransform<PBegin, PCollection<DBRow>> {
 
-    String driver = "";
-    String conn_string = "";
-    String username = "";
-    String password = "";
-    String query = "";
+    private final String driver;
+    private final String connectionString;
+    private final String username;
+    private final String password;
+    private final String query;
+    private final List<String> columnNames;
 
-    public ScanHanaTableFn(String d, String cs, String u, String p, String q) 
-    {
-      this.driver = d;
-      this.conn_string = cs;
-      this.username = u;
-      this.password = p;
-      this.query = q;
+    private HanaToDBRow(Reader reader) {
+      this.driver = reader.driver;
+      this.connectionString = reader.connectionString;
+      this.username = reader.username;
+      this.password = reader.password;
+      this.query = reader.query;
+      this.columnNames = reader.columnNames;
     }
 
-    public PCollection<TableRow> expand(PBegin input)
-    {
+    public static class Reader {
+      private final String driver;
+      private final String connectionString;
+      private String username;
+      private String password;
+      private String query;
+      private List<String> columnNames;
+
+      public Reader(String driver, String connectionString) {
+        this.driver = driver;
+        this.connectionString = connectionString;
+      }
+
+      public Reader withUsername(String username) {
+        this.username = username;
+        return this;
+      }
+
+      public Reader withPassword(String password) {
+        this.password = password;
+        return this;
+      }
+
+      public Reader withQuery(String query) {
+        this.query = query;
+        return this;
+      }
+
+      public Reader withColumnNames(List<String> columnNames) {
+        this.columnNames = columnNames;
+        return this;
+      }
+
+      public HanaToDBRow create() {
+        return new HanaToDBRow(this);
+      }
+    }
+
+    @Override
+    public PCollection<DBRow> expand(PBegin input) {
       Pipeline pipeline = input.getPipeline();
 
-      return pipeline.apply("Map Hana to DBRow", JdbcIO.<DBRow>read()
+      return pipeline.apply("Hana JDBC IO", JdbcIO.<DBRow>read()
           .withCoder(SerializableCoder.of(DBRow.class))
           .withDataSourceConfiguration(JdbcIO.DataSourceConfiguration.create(
-              this.driver, this.conn_string)
+              this.driver, this.connectionString)
             .withUsername(this.username)
             .withPassword(this.password))
 
@@ -117,38 +154,43 @@ public class HanaToBQ {
               ResultSetMetaData meta = resultSet.getMetaData();
               int columnCount = meta.getColumnCount();
               List<Object> values = new ArrayList<Object>();
-              List<String> col_names = new ArrayList<String>();
-              List<Integer> col_types = new ArrayList<Integer>(); 
-              for (int column = 1; column <= columnCount; ++column) 
+              for (int column = 1; column <= columnCount; ++column)
               {
-                Object value = resultSet.getObject(column);
+                String name = HanaToDBRow.this.columnNames.get(column - 1);
+                Object value = resultSet.getObject(name);
                 values.add(value);
-                col_names.add(meta.getColumnName(column));
-                col_types.add(meta.getColumnType(column));
+
               }
-              return DBRow.create(values, col_names, col_types);
+              return DBRow.create(values);
             }
-          }))
-      .apply("DBRow to TableRow", ParDo.of(new DoFn<DBRow, TableRow>() {
-        @ProcessElement
-        public void processElement(ProcessContext c) {
-          DBRow data = c.element();
-          List<Object> fields = data.fields();
-          List<String> col_names = data.col_names();
-          TableRow row = new TableRow();
-          for(int i = 0; i < fields.size(); i++)
-          {
-            Object field_data = fields.get(i);
-            String col_name = col_names.get(i);
-            if(field_data == null)
-              continue;
-            String s_data = field_data.toString();
-            if(!s_data.toLowerCase().equals("null"))
-              row.put(col_name, s_data);
-          }
-          c.output(row);
-        }
-      }));
+          }));
+    }
+  }
+
+  public static class HanaDBRowToTableRowFn extends DoFn<DBRow, TableRow> {
+    PCollectionView<List<String>> columnNamesCollection;
+
+    public HanaDBRowToTableRowFn(PCollectionView<List<String>> columnNamesCollection) {
+      this.columnNamesCollection = columnNamesCollection;
+    }
+
+    @ProcessElement
+    public void processElement(ProcessContext c) {
+      DBRow data = c.element();
+      List<String> columnNames = c.sideInput(columnNamesCollection);
+      List<Object> fields = data.fields();
+      TableRow row = new TableRow();
+      for(int i = 0; i < fields.size(); i++)
+      {
+        Object fieldData = fields.get(i);
+        String columnName = columnNames.get(i);
+        if(fieldData == null)
+          continue;
+        String sFieldData = fieldData.toString();
+        if(!sFieldData.toLowerCase().equals("null"))
+          row.put(columnName, sFieldData);
+      }
+      c.output(row);
     }
   }
 
@@ -160,7 +202,7 @@ public class HanaToBQ {
    */
   public static TableSchema getSchema(Options options) {
     Connection connection = null;
-    try {                  
+    try {
       connection = DriverManager.getConnection("jdbc:sap://10.128.15.195:30015/?databaseName=HD1", options.getUsername(), options.getPassword());
     } catch (SQLException e) {
       System.err.println("Connection Failed while trying to retrieve schema: " + e.getMessage());
@@ -169,25 +211,29 @@ public class HanaToBQ {
       try {
         Statement stmt = connection.createStatement();
 
-        ResultSet resultSet = stmt.executeQuery("SELECT COLUMN_NAME,DATA_TYPE_NAME FROM TABLE_COLUMNS WHERE TABLE_NAME = '" + options.getTableName() + "'");
-        Map<String, String> columns = new HashMap<String,String>(); 
+        ResultSet resultSet = stmt.executeQuery(String.format(schemaQueryTemplate, options.getTableName()));
+        Map<String, String> columns = new HashMap<String,String>();
+        List<String> orderedColumns = new ArrayList<String>();
         while(resultSet.next())
         {
-          String col_name = resultSet.getString("COLUMN_NAME");
+          String columnName = resultSet.getString("COLUMN_NAME");
           String type = resultSet.getString("DATA_TYPE_NAME");
-          columns.put(col_name, type);
-        } 
+          columns.put(columnName, type);
+          orderedColumns.add(columnName);
+        }
         TableSchema schema = new TableSchema();
         List<TableFieldSchema> tableFieldSchema = new ArrayList<TableFieldSchema>();
-        for(String col_name : columns.keySet())
+        for(String columnName : orderedColumns)
         {
           TableFieldSchema schemaEntry = new TableFieldSchema();
-          schemaEntry.setName(col_name);
-          String type = columns.get(col_name); 
+          schemaEntry.setName(columnName);
+          String type = columns.get(columnName);
           if(hanaToBqTypeMap.containsKey(type))
             schemaEntry.setType(hanaToBqTypeMap.get(type));
-          else
-            schemaEntry.setType("STRING");
+          else {
+            logger.severe("Unhandled Hana type: " +  type);
+            throw new SQLException("Unhandled Hana Type");
+          }
           tableFieldSchema.add(schemaEntry);
         }
         schema.setFields(tableFieldSchema);
@@ -202,43 +248,43 @@ public class HanaToBQ {
 
   public interface Options extends PipelineOptions {
     @Description("Hana table name to read")
-    @Validation.Required
-    String getTableName();
+      @Validation.Required
+      String getTableName();
     void setTableName(String value);
 
     @Description("Hana connection string.")
-    @Validation.Required
-    String getConnectionString();
+      @Validation.Required
+      String getConnectionString();
     void setConnectionString(String value);
 
     @Description("Hana username.")
-    @Validation.Required
-    String getUsername();
+      @Validation.Required
+      String getUsername();
     void setUsername(String value);
 
     @Description("Hana password.")
-    @Validation.Required
-    String getPassword();
+      @Validation.Required
+      String getPassword();
     void setPassword(String value);
 
     @Description("Hana driver to use.")
-    @Default.String("com.sap.db.jdbc.Driver")
-    String getDriver();
+      @Default.String("com.sap.db.jdbc.Driver")
+      String getDriver();
     void setDriver(String value);
 
     @Description("Bigquery destionation dataset.")
-    @Validation.Required
-    String getDestDataset();
+      @Validation.Required
+      String getDestDataset();
     void setDestDataset(String value);
 
     @Description("Timestamp column name.")
-    @Validation.Required
-    String getTimestampColumn();
+      @Validation.Required
+      String getTimestampColumn();
     void setTimestampColumn(String value);
 
     @Description("Start time, inclusive")
-    @Validation.Required
-    String getStartTime();
+      @Validation.Required
+      String getStartTime();
     void setStartTime(String value);
 
     @Description("End time, inclusive")
@@ -251,17 +297,34 @@ public class HanaToBQ {
 
     Options options = PipelineOptionsFactory.fromArgs(args).withValidation().as(Options.class);
     Pipeline pipeline = Pipeline.create(options);
-    TableSchema bqHanaSchema = getSchema(options); 
-    String query = "SELECT * FROM " + options.getTableName() + " WHERE " +
-      options.getTimestampColumn() + " >= " + options.getStartTime();
+    TableSchema bqHanaSchema = getSchema(options);
+    List<String> columnNames = new ArrayList<String>();
+    for(TableFieldSchema fieldSchema : bqHanaSchema.getFields())
+    {
+      columnNames.add(fieldSchema.getName());
+    }
+
+    String queryClause = "";
     if(options.getEndTime() != null)
     {
-      query += " AND " + options.getTimestampColumn() + " < " + options.getEndTime();
+      queryClause += " AND " + options.getTimestampColumn() + " < " + options.getEndTime();
     }
+    String query = String.format(queryTemplate, options.getTableName(), options.getTimestampColumn(),
+        options.getStartTime(), queryClause);
+
+    PCollectionView<List<String>> columnNamesCollection = pipeline
+      .apply(Create.of(columnNames)).setCoder(StringUtf8Coder.of())
+      .apply(View.<String>asList());
     logger.info(query);
-    pipeline 
-      .apply(new ScanHanaTableFn(options.getDriver(), options.getConnectionString(),
-            options.getUsername(), options.getPassword(), query)) 
+    pipeline
+      .apply(new HanaToDBRow.Reader(options.getDriver(), options.getConnectionString())
+         .withUsername(options.getUsername())
+         .withPassword(options.getPassword())
+         .withQuery(query)
+         .withColumnNames(columnNames)
+         .create())
+      .apply("Hana row to BQ TableRow",ParDo.of(new HanaDBRowToTableRowFn(columnNamesCollection))
+          .withSideInputs(columnNamesCollection))
       .apply(BigQueryIO.writeTableRows().to(options.getDestDataset() + "." + options.getTableName())
           .withSchema(bqHanaSchema)
           .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
