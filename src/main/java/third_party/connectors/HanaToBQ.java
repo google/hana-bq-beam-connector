@@ -1,10 +1,10 @@
 /*
- * Copyright 2017 Mark Shalda
- *
+ * Copyright 2017 Mark Shalda 
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package third_party.connectors;
+package third_party.connectors; 
 
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
@@ -79,10 +79,14 @@ public class HanaToBQ {
     .put("DECIMAL", "FLOAT")
     .put("DOUBLE", "FLOAT")
     .put("REAL", "FLOAT")
-    .build();
+    .build(); 
 
+  /*
+   * PTransform that connects to a SAP Hana DB and reads data from the query and puts
+   * the resulting rows into {@link DBRow} {@link PCollection}. The columns are ordered in the same
+   * order as the provided column names list.
+   */
   public static class HanaToDBRow extends PTransform<PBegin, PCollection<DBRow>> {
-
     private final String driver;
     private final String connectionString;
     private final String username;
@@ -137,6 +141,9 @@ public class HanaToBQ {
       }
     }
 
+    /*
+     * Use JdbcIO to read from Hana and map each row to a {@link DBRow} object
+     */
     @Override
     public PCollection<DBRow> expand(PBegin input) {
       Pipeline pipeline = input.getPipeline();
@@ -154,11 +161,12 @@ public class HanaToBQ {
               ResultSetMetaData meta = resultSet.getMetaData();
               int columnCount = meta.getColumnCount();
               List<Object> values = new ArrayList<Object>();
-              for (int column = 1; column <= columnCount; ++column)
+              for (int column = 1; column <= columnCount; ++column) 
               {
                 String name = HanaToDBRow.this.columnNames.get(column - 1);
                 Object value = resultSet.getObject(name);
                 values.add(value);
+                System.out.println("column " + column + " = " + name + ", value = " + value.toString());
 
               }
               return DBRow.create(values);
@@ -167,6 +175,10 @@ public class HanaToBQ {
     }
   }
 
+  /*
+   * DoFn to take a {@link DBRow} and convert to a {@link TableRow} for use with BigQuery
+   * using the column names provided via side input
+   */
   public static class HanaDBRowToTableRowFn extends DoFn<DBRow, TableRow> {
     PCollectionView<List<String>> columnNamesCollection;
 
@@ -180,8 +192,10 @@ public class HanaToBQ {
       List<String> columnNames = c.sideInput(columnNamesCollection);
       List<Object> fields = data.fields();
       TableRow row = new TableRow();
+      System.out.println(columnNames.toString());
       for(int i = 0; i < fields.size(); i++)
       {
+        System.out.println("at i = " + i); 
         Object fieldData = fields.get(i);
         String columnName = columnNames.get(i);
         if(fieldData == null)
@@ -203,7 +217,7 @@ public class HanaToBQ {
   public static TableSchema getSchema(Options options) {
     Connection connection = null;
     try {
-      connection = DriverManager.getConnection("jdbc:sap://10.128.15.195:30015/?databaseName=HD1", options.getUsername(), options.getPassword());
+      connection = DriverManager.getConnection(options.getConnectionString(), options.getUsername(), options.getPassword());
     } catch (SQLException e) {
       System.err.println("Connection Failed while trying to retrieve schema: " + e.getMessage());
     }
@@ -213,21 +227,21 @@ public class HanaToBQ {
 
         ResultSet resultSet = stmt.executeQuery(String.format(schemaQueryTemplate, options.getTableName()));
         Map<String, String> columns = new HashMap<String,String>();
-        List<String> orderedColumns = new ArrayList<String>();
+        List<String> orderedColumns = new ArrayList<String>(); 
         while(resultSet.next())
         {
           String columnName = resultSet.getString("COLUMN_NAME");
           String type = resultSet.getString("DATA_TYPE_NAME");
           columns.put(columnName, type);
           orderedColumns.add(columnName);
-        }
+        } 
         TableSchema schema = new TableSchema();
         List<TableFieldSchema> tableFieldSchema = new ArrayList<TableFieldSchema>();
         for(String columnName : orderedColumns)
         {
           TableFieldSchema schemaEntry = new TableFieldSchema();
           schemaEntry.setName(columnName);
-          String type = columns.get(columnName);
+          String type = columns.get(columnName); 
           if(hanaToBqTypeMap.containsKey(type))
             schemaEntry.setType(hanaToBqTypeMap.get(type));
           else {
@@ -248,43 +262,43 @@ public class HanaToBQ {
 
   public interface Options extends PipelineOptions {
     @Description("Hana table name to read")
-      @Validation.Required
-      String getTableName();
+    @Validation.Required
+    String getTableName();
     void setTableName(String value);
 
     @Description("Hana connection string.")
-      @Validation.Required
-      String getConnectionString();
+    @Validation.Required
+    String getConnectionString();
     void setConnectionString(String value);
 
     @Description("Hana username.")
-      @Validation.Required
-      String getUsername();
+    @Validation.Required
+    String getUsername();
     void setUsername(String value);
 
     @Description("Hana password.")
-      @Validation.Required
-      String getPassword();
+    @Validation.Required
+    String getPassword();
     void setPassword(String value);
 
     @Description("Hana driver to use.")
-      @Default.String("com.sap.db.jdbc.Driver")
-      String getDriver();
+    @Default.String("com.sap.db.jdbc.Driver")
+    String getDriver();
     void setDriver(String value);
 
     @Description("Bigquery destionation dataset.")
-      @Validation.Required
-      String getDestDataset();
+    @Validation.Required
+    String getDestDataset();
     void setDestDataset(String value);
 
     @Description("Timestamp column name.")
-      @Validation.Required
-      String getTimestampColumn();
+    @Validation.Required
+    String getTimestampColumn();
     void setTimestampColumn(String value);
 
     @Description("Start time, inclusive")
-      @Validation.Required
-      String getStartTime();
+    @Validation.Required
+    String getStartTime();
     void setStartTime(String value);
 
     @Description("End time, inclusive")
@@ -294,10 +308,10 @@ public class HanaToBQ {
 
 
   public static void main(String[] args) {
-
+    
     Options options = PipelineOptionsFactory.fromArgs(args).withValidation().as(Options.class);
     Pipeline pipeline = Pipeline.create(options);
-    TableSchema bqHanaSchema = getSchema(options);
+    TableSchema bqHanaSchema = getSchema(options); 
     List<String> columnNames = new ArrayList<String>();
     for(TableFieldSchema fieldSchema : bqHanaSchema.getFields())
     {

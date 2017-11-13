@@ -31,13 +31,11 @@ public abstract class DBRow implements Serializable{
   /**
    * Manually create a DB row.
    */
-  public static DBRow create(List<Object> fields, List<String> col_names, List<Integer> col_types) {
-    return new AutoValue_DBRow(fields, col_names, col_types);
+  public static DBRow create(List<Object> fields) {
+    return new AutoValue_DBRow(fields);
   }
 
   public abstract List<Object> fields();
-  public abstract List<String> col_names();
-  public abstract List<Integer> col_types();
 }
 
 
