@@ -51,7 +51,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import connectors.DBRow;
+import third_party.connectors.DBRow;
 
 public class HanaToBQ {
   private static Logger logger = Logger.getLogger(HanaToBQ.class.getSimpleName());
