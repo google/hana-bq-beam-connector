@@ -18,7 +18,7 @@ mvn install:install-file -Dfile=ngdbc.jar \
 Once the jdbc driver is installed, you can build and run the pipeline using the following maven command:
 
 mvn compile exec:java \
-	-Dexec.mainClass=connectors.HanaToBQ \
+	-Dexec.mainClass=third_party.connectors.HanaToBQ \
 	-Dexec.args="--tempLocation=<i.e. gs://my-bucket/temp>
 		--runner=DataflowRunner
 		--project=<my-project-id>
@@ -30,5 +30,6 @@ mvn compile exec:java \
 		--destDataset=<bq dest dataset>
 		--timestampColumn=<numeric timestamp column>
 		--startTime=<epoch start time>
-		--endTime=<epoch end time>" \
+		--endTime=<epoch end time>
+		--chunkSize=<approximate # of rows in query chunk>" \
 	-Pdataflow-runner
